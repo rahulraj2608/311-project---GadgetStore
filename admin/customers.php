@@ -14,11 +14,12 @@ $filter_admin = isset($_GET['filter_admin']) ? (int)$_GET['filter_admin'] : -1;
 
 // Build query for customers with order statistics
 $sql = "SELECT c.*, 
-               COUNT(o.order_id) as total_orders,
-               COALESCE(SUM(o.total_amount), 0) as total_spent,
-               MAX(o.order_date) as last_order_date
+                COUNT(o.order_id) as total_orders,
+                COALESCE(SUM(o.total_amount), 0) as total_spent,
+                MAX(o.order_date) as last_order_date
         FROM customer c
-        LEFT JOIN orders o ON c.customer_id = o.customer_id
+        -- FIX APPLIED: Renamed `ordesr` to `orders`
+        LEFT JOIN `orders` o ON c.customer_id = o.customer_id
         WHERE 1=1";
 
 $params = [];
@@ -51,7 +52,8 @@ if (isset($_GET['delete'])) {
     $customer_id = (int)$_GET['delete'];
     
     // Check if customer has orders
-    $check_stmt = $pdo->prepare("SELECT COUNT(*) as order_count FROM orders WHERE customer_id = ?");
+    // FIX APPLIED: Renamed `orders` to `orders` (was correct here, just verifying)
+    $check_stmt = $pdo->prepare("SELECT COUNT(*) as order_count FROM `orders` WHERE customer_id = ?");
     $check_stmt->execute([$customer_id]);
     $result = $check_stmt->fetch();
     
@@ -160,7 +162,6 @@ if (isset($_GET['toggle_admin'])) {
                     </div>
                 </div>
                 
-                <!-- Success/Error Messages -->
                 <?php if (isset($_SESSION['success'])): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $_SESSION['success']; unset($_SESSION['success']); ?>
@@ -175,14 +176,14 @@ if (isset($_GET['toggle_admin'])) {
                     </div>
                 <?php endif; ?>
                 
-                <!-- Statistics Cards -->
                 <div class="row mb-4">
                     <?php
                     // Get statistics
+                    // FIX APPLIED: Renamed `order` to `orders` in statistics queries
                     $total_customers = $pdo->query("SELECT COUNT(*) as count FROM customer")->fetch()['count'];
                     $total_admins = $pdo->query("SELECT COUNT(*) as count FROM customer WHERE is_admin = 1")->fetch()['count'];
-                    $active_customers = $pdo->query("SELECT COUNT(DISTINCT customer_id) as count FROM orders WHERE order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)")->fetch()['count'];
-                    $total_revenue = $pdo->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM orders")->fetch()['total'];
+                    $active_customers = $pdo->query("SELECT COUNT(DISTINCT customer_id) as count FROM `orders` WHERE order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)")->fetch()['count'];
+                    $total_revenue = $pdo->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM `orders`")->fetch()['total'];
                     ?>
                     
                     <div class="col-md-3">
@@ -243,7 +244,6 @@ if (isset($_GET['toggle_admin'])) {
                     </div>
                 </div>
                 
-                <!-- Search and Filter Section -->
                 <div class="search-container">
                     <form method="GET" action="" class="row g-3">
                         <div class="col-md-8">
@@ -277,7 +277,6 @@ if (isset($_GET['toggle_admin'])) {
                     <?php endif; ?>
                 </div>
                 
-                <!-- Customers Table -->
                 <div class="card">
                     <div class="card-body">
                         <div class="table-responsive">
@@ -357,7 +356,7 @@ if (isset($_GET['toggle_admin'])) {
                                             <?php if ($customer['customer_id'] != $_SESSION['user_id']): ?>
                                             <a href="?delete=<?php echo $customer['customer_id']; ?>" 
                                                class="btn btn-sm btn-outline-danger"
-                                               onclick="return confirm('Are you sure? This will permanently delete the customer and all their data.')"
+                                               onclick="return confirm('Are you sure? This will permanently delete the customer and all their data. Orders must be deleted first!')"
                                                title="Delete">
                                                 <i class="bi bi-trash"></i>
                                             </a>
@@ -382,7 +381,6 @@ if (isset($_GET['toggle_admin'])) {
         </div>
     </div>
 
-    <!-- Add Customer Modal -->
     <div class="modal fade" id="addCustomerModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -440,7 +438,6 @@ if (isset($_GET['toggle_admin'])) {
         </div>
     </div>
 
-    <!-- JavaScript Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>

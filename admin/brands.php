@@ -14,23 +14,29 @@ if (!isLoggedIn() || !isAdmin()) {
 
 // Handle search and filtering
 $search = isset($_GET['search']) ? sanitize($_GET['search']) : '';
-$sql = "SELECT b.*, COUNT(p.product_id) as product_count
-        FROM brand b
-        LEFT JOIN product p ON b.brand_id = p.brand_id
+$sql = "SELECT d.*, c.category_name 
+        FROM discount d
+        LEFT JOIN category c ON d.category_id = c.category_id
         WHERE 1=1";
 $params = [];
 
 if ($search) {
-    $sql .= " AND b.brand_name LIKE ?";
+    // Search by discount code or applicable type
+    $sql .= " AND (d.discount_code LIKE ? OR d.type LIKE ?)";
+    $params[] = "%$search%";
     $params[] = "%$search%";
 }
 
-$sql .= " GROUP BY b.brand_id ORDER BY b.brand_name ASC";
+$sql .= " ORDER BY d.expiry_date ASC";
 
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$brands = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
+try {
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $discounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    // In a real application, log this error instead of echoing
+    die("Database Error: " . $e->getMessage());
+}
 
 // ------------------------------
 // 2. HANDLE DELETION (GET Request)
@@ -38,22 +44,20 @@ $brands = $stmt->fetchAll(PDO::FETCH_ASSOC);
 if (isset($_GET['delete_id'])) {
     $delete_id = (int)$_GET['delete_id'];
     
-    // Check if any products are associated with this brand
-    $check_stmt = $pdo->prepare("SELECT COUNT(*) FROM product WHERE brand_id = ?");
-    $check_stmt->execute([$delete_id]);
-    $product_count = $check_stmt->fetchColumn();
-
-    if ($product_count == 0) {
-        // Safe to delete
-        $delete_stmt = $pdo->prepare("DELETE FROM brand WHERE brand_id = ?");
+    try {
+        // Since discounts might not have immediate foreign key constraints 
+        // (they are used in transactions, but deleting them is usually safe 
+        // unless they are currently 'applied' to an open cart), we proceed with deletion.
+        $delete_stmt = $pdo->prepare("DELETE FROM discount WHERE discount_id = ?");
         $delete_stmt->execute([$delete_id]);
-        $_SESSION['success'] = "Brand deleted successfully.";
-    } else {
-        $_SESSION['error'] = "Cannot delete brand. {$product_count} product(s) are currently linked to it.";
+        
+        $_SESSION['success'] = "Discount code deleted successfully.";
+    } catch (PDOException $e) {
+        $_SESSION['error'] = "Failed to delete discount. Database error.";
     }
     
     // Redirect to clear the GET parameter
-    redirect('brands.php');
+    redirect('discounts.php');
 }
 ?>
 <!DOCTYPE html>
@@ -61,7 +65,7 @@ if (isset($_GET['delete_id'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Brands - Admin</title>
+    <title>Manage Discounts - Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
     <style>
@@ -70,7 +74,9 @@ if (isset($_GET['delete_id'])) {
         .sidebar .nav-link:hover { background-color: #495057; }
         .sidebar .nav-link.active { background-color: #007bff; }
         .main-content { padding: 20px; }
-        .brand-icon { font-size: 1.5rem; color: #6c757d; }
+        .expired { background-color: #f8d7da; } /* Light red for expired */
+        .upcoming { background-color: #fff3cd; } /* Light yellow for upcoming */
+        .active-discount { background-color: #d4edda; } /* Light green for active */
     </style>
 </head>
 <body>
@@ -80,32 +86,23 @@ if (isset($_GET['delete_id'])) {
             
             <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
                 <div class="d-flex justify-content-between align-items-center pt-3 pb-2 mb-3 border-bottom">
-                    <h1><i class="bi bi-tag-fill me-2"></i> Brand Management</h1>
+                    <h1><i class="bi bi-percent me-2"></i> Discount Management</h1>
                     <div>
-                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addBrandModal">
-                            <i class="bi bi-plus-lg"></i> Add New Brand
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDiscountModal">
+                            <i class="bi bi-plus-lg"></i> Add New Discount
                         </button>
                     </div>
                 </div>
 
-                <?php if (isset($_SESSION['success'])): ?>
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        <?php echo $_SESSION['success']; unset($_SESSION['success']); ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if (isset($_SESSION['error'])): ?>
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <?php echo $_SESSION['error']; unset($_SESSION['error']); ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                <?php endif; ?>
+                <?php 
+                // Display session messages (success/error)
+                displaySessionMessages(); // Assuming this is defined in functions.php
+                ?>
 
                 <div class="card p-3 mb-4">
-                    <form method="GET" action="brands.php" class="row g-3 align-items-center">
+                    <form method="GET" action="discounts.php" class="row g-3 align-items-center">
                         <div class="col-md-10">
-                            <input type="text" class="form-control" name="search" placeholder="Search by brand name..." value="<?php echo htmlspecialchars($search); ?>">
+                            <input type="text" class="form-control" name="search" placeholder="Search by code or type..." value="<?php echo htmlspecialchars($search); ?>">
                         </div>
                         <div class="col-md-2 d-grid">
                             <button type="submit" class="btn btn-secondary">Search</button>
@@ -119,37 +116,76 @@ if (isset($_GET['delete_id'])) {
                             <table class="table table-striped table-hover">
                                 <thead>
                                     <tr>
-                                        <th style="width: 10%;">ID</th>
-                                        <th style="width: 50%;">Brand Name</th>
-                                        <th style="width: 20%;">Products Count</th>
-                                        <th style="width: 20%;">Actions</th>
+                                        <th>Code</th>
+                                        <th>Type</th>
+                                        <th>Value</th>
+                                        <th>Applies To</th>
+                                        <th>Start Date</th>
+                                        <th>Expiry Date</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php if (!empty($brands)): ?>
-                                        <?php foreach ($brands as $brand): ?>
-                                            <tr>
-                                                <td><?php echo $brand['brand_id']; ?></td>
+                                    <?php if (!empty($discounts)): ?>
+                                        <?php 
+                                        $today = new DateTime('now');
+                                        foreach ($discounts as $discount): 
+                                            $startDate = new DateTime($discount['start_date']);
+                                            $expiryDate = new DateTime($discount['expiry_date']);
+                                            $status = '';
+                                            $rowClass = '';
+
+                                            if ($expiryDate < $today) {
+                                                $status = '<span class="badge bg-danger">Expired</span>';
+                                                $rowClass = 'expired';
+                                            } elseif ($startDate > $today) {
+                                                $status = '<span class="badge bg-warning text-dark">Upcoming</span>';
+                                                $rowClass = 'upcoming';
+                                            } else {
+                                                $status = '<span class="badge bg-success">Active</span>';
+                                                $rowClass = 'active-discount';
+                                            }
+                                        ?>
+                                            <tr class="<?php echo $rowClass; ?>">
+                                                <td><strong><?php echo htmlspecialchars($discount['discount_code']); ?></strong></td>
+                                                <td><?php echo ucfirst(htmlspecialchars($discount['type'])); ?></td>
                                                 <td>
-                                                    <i class="bi bi-diamond-fill me-2 brand-icon"></i>
-                                                    <strong><?php echo htmlspecialchars($brand['brand_name']); ?></strong>
+                                                    <?php 
+                                                    echo $discount['type'] === 'percentage' 
+                                                        ? htmlspecialchars($discount['value']) . '%' 
+                                                        : '$' . number_format(htmlspecialchars($discount['value']), 2);
+                                                    ?>
                                                 </td>
                                                 <td>
-                                                    <span class="badge bg-info text-dark">
-                                                        <?php echo $brand['product_count']; ?> Products
-                                                    </span>
+                                                    <?php 
+                                                    if ($discount['applicable_to'] === 'category' && $discount['category_name']) {
+                                                        echo "Category: " . htmlspecialchars($discount['category_name']);
+                                                    } else {
+                                                        echo ucfirst(htmlspecialchars($discount['applicable_to']));
+                                                    }
+                                                    ?>
                                                 </td>
+                                                <td><?php echo date('Y-m-d', strtotime($discount['start_date'])); ?></td>
+                                                <td><?php echo date('Y-m-d', strtotime($discount['expiry_date'])); ?></td>
+                                                <td><?php echo $status; ?></td>
                                                 <td>
-                                                    <button type="button" class="btn btn-sm btn-outline-warning edit-brand-btn" 
-                                                            data-id="<?php echo $brand['brand_id']; ?>" 
-                                                            data-name="<?php echo htmlspecialchars($brand['brand_name']); ?>"
-                                                            data-bs-toggle="modal" data-bs-target="#editBrandModal" title="Edit">
+                                                    <button type="button" class="btn btn-sm btn-outline-warning edit-discount-btn" 
+                                                            data-id="<?php echo $discount['discount_id']; ?>" 
+                                                            data-code="<?php echo htmlspecialchars($discount['discount_code']); ?>"
+                                                            data-type="<?php echo htmlspecialchars($discount['type']); ?>"
+                                                            data-value="<?php echo htmlspecialchars($discount['value']); ?>"
+                                                            data-applies-to="<?php echo htmlspecialchars($discount['applicable_to']); ?>"
+                                                            data-category-id="<?php echo htmlspecialchars($discount['category_id']); ?>"
+                                                            data-start-date="<?php echo date('Y-m-d', strtotime($discount['start_date'])); ?>"
+                                                            data-expiry-date="<?php echo date('Y-m-d', strtotime($discount['expiry_date'])); ?>"
+                                                            data-bs-toggle="modal" data-bs-target="#editDiscountModal" title="Edit">
                                                         <i class="bi bi-pencil"></i>
                                                     </button>
-                                                    <a href="?delete_id=<?php echo $brand['brand_id']; ?>" 
-                                                       class="btn btn-sm btn-outline-danger" 
-                                                       onclick="return confirm('Are you sure you want to delete the brand: <?php echo htmlspecialchars($brand['brand_name']); ?>? This cannot be undone if no products are linked.')"
-                                                       title="Delete">
+                                                    <a href="?delete_id=<?php echo $discount['discount_id']; ?>" 
+                                                        class="btn btn-sm btn-outline-danger" 
+                                                        onclick="return confirm('Are you sure you want to delete the discount: <?php echo htmlspecialchars($discount['discount_code']); ?>?')"
+                                                        title="Delete">
                                                         <i class="bi bi-trash"></i>
                                                     </a>
                                                 </td>
@@ -157,7 +193,7 @@ if (isset($_GET['delete_id'])) {
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="4" class="text-center py-4">No brands found.</td>
+                                            <td colspan="8" class="text-center py-4">No discounts found.</td>
                                         </tr>
                                     <?php endif; ?>
                                 </tbody>
@@ -169,42 +205,132 @@ if (isset($_GET['delete_id'])) {
         </div>
     </div>
 
-    <div class="modal fade" id="addBrandModal" tabindex="-1" aria-labelledby="addBrandModalLabel" aria-hidden="true">
+    <div class="modal fade" id="addDiscountModal" tabindex="-1" aria-labelledby="addDiscountModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
-                <form method="POST" action="add-brand.php">
+                <form method="POST" action="process-discount.php?action=add">
                     <div class="modal-header bg-primary text-white">
-                        <h5 class="modal-title" id="addBrandModalLabel">Add New Brand</h5>
+                        <h5 class="modal-title" id="addDiscountModalLabel">Add New Discount</h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
-                            <label for="brand_name" class="form-label">Brand Name *</label>
-                            <input type="text" class="form-control" id="brand_name" name="brand_name" required>
+                            <label for="add_discount_code" class="form-label">Discount Code *</label>
+                            <input type="text" class="form-control" id="add_discount_code" name="discount_code" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="add_type" class="form-label">Discount Type *</label>
+                                <select class="form-select" id="add_type" name="type" required>
+                                    <option value="percentage">Percentage (%)</option>
+                                    <option value="fixed_amount">Fixed Amount ($)</option>
+                                    </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="add_value" class="form-label">Value *</label>
+                                <input type="number" step="0.01" class="form-control" id="add_value" name="value" required min="0">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="add_applicable_to" class="form-label">Applies To *</label>
+                                <select class="form-select" id="add_applicable_to" name="applicable_to" required>
+                                    <option value="all">All Products</option>
+                                    <option value="category">Specific Category</option>
+                                    </select>
+                            </div>
+                            <div class="col-md-6 mb-3" id="add_category_field" style="display:none;">
+                                <label for="add_category_id" class="form-label">Category</label>
+                                <select class="form-select" id="add_category_id" name="category_id">
+                                    <option value="">Select Category (If Applicable)</option>
+                                    <?php 
+                                    // You would fetch categories here:
+                                    /*
+                                    $cat_stmt = $pdo->query("SELECT category_id, category_name FROM category ORDER BY category_name");
+                                    while ($cat = $cat_stmt->fetch(PDO::FETCH_ASSOC)) {
+                                        echo "<option value=\"{$cat['category_id']}\">{$cat['category_name']}</option>";
+                                    }
+                                    */
+                                    ?>
+                                    <option value="1">Electronics</option>
+                                    <option value="2">Apparel</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="add_start_date" class="form-label">Start Date *</label>
+                                <input type="date" class="form-control" id="add_start_date" name="start_date" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="add_expiry_date" class="form-label">Expiry Date *</label>
+                                <input type="date" class="form-control" id="add_expiry_date" name="expiry_date" required>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Add Brand</button>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Add Discount</button>
                     </div>
                 </form>
             </div>
         </div>
     </div>
 
-    <div class="modal fade" id="editBrandModal" tabindex="-1" aria-labelledby="editBrandModalLabel" aria-hidden="true">
+    <div class="modal fade" id="editDiscountModal" tabindex="-1" aria-labelledby="editDiscountModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
-                <form method="POST" action="edit-brand.php">
+                <form method="POST" action="process-discount.php?action=edit">
                     <div class="modal-header bg-warning text-dark">
-                        <h5 class="modal-title" id="editBrandModalLabel">Edit Brand</h5>
+                        <h5 class="modal-title" id="editDiscountModalLabel">Edit Discount</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <input type="hidden" name="brand_id" id="edit_brand_id">
+                        <input type="hidden" name="discount_id" id="edit_discount_id">
+                        
                         <div class="mb-3">
-                            <label for="edit_brand_name" class="form-label">Brand Name *</label>
-                            <input type="text" class="form-control" id="edit_brand_name" name="brand_name" required>
+                            <label for="edit_discount_code" class="form-label">Discount Code *</label>
+                            <input type="text" class="form-control" id="edit_discount_code" name="discount_code" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="edit_type" class="form-label">Discount Type *</label>
+                                <select class="form-select" id="edit_type" name="type" required>
+                                    <option value="percentage">Percentage (%)</option>
+                                    <option value="fixed_amount">Fixed Amount ($)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="edit_value" class="form-label">Value *</label>
+                                <input type="number" step="0.01" class="form-control" id="edit_value" name="value" required min="0">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="edit_applicable_to" class="form-label">Applies To *</label>
+                                <select class="form-select" id="edit_applicable_to" name="applicable_to" required>
+                                    <option value="all">All Products</option>
+                                    <option value="category">Specific Category</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3" id="edit_category_field" style="display:none;">
+                                <label for="edit_category_id" class="form-label">Category</label>
+                                <select class="form-select" id="edit_category_id" name="category_id">
+                                    <option value="">Select Category (If Applicable)</option>
+                                    <option value="1">Electronics</option>
+                                    <option value="2">Apparel</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="edit_start_date" class="form-label">Start Date *</label>
+                                <input type="date" class="form-control" id="edit_start_date" name="start_date" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="edit_expiry_date" class="form-label">Expiry Date *</label>
+                                <input type="date" class="form-control" id="edit_expiry_date" name="expiry_date" required>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -220,15 +346,49 @@ if (isset($_GET['delete_id'])) {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 
     <script>
-    // Script to pass data to the Edit Brand Modal
     $(document).ready(function() {
-        $('.edit-brand-btn').on('click', function() {
-            var brandId = $(this).data('id');
-            var brandName = $(this).data('name');
+        // Function to toggle Category field visibility
+        function toggleCategoryField(selector, fieldId) {
+            if ($(selector).val() === 'category') {
+                $(fieldId).show();
+                $(fieldId).find('select').prop('required', true);
+            } else {
+                $(fieldId).hide();
+                $(fieldId).find('select').prop('required', false);
+            }
+        }
+
+        // Add Discount Modal - Event Handlers
+        $('#add_applicable_to').on('change', function() {
+            toggleCategoryField(this, '#add_category_field');
+        });
+        // Initial check for Add Modal (in case of cached form data)
+        toggleCategoryField('#add_applicable_to', '#add_category_field');
+
+
+        // Edit Discount Modal - Event Handlers
+        $('#edit_applicable_to').on('change', function() {
+            toggleCategoryField(this, '#edit_category_field');
+        });
+
+        // Script to pass data to the Edit Discount Modal
+        $('.edit-discount-btn').on('click', function() {
+            var data = $(this).data(); // Get all data-* attributes
+
+            // Populate the hidden ID field
+            $('#edit_discount_id').val(data.id);
             
-            // Populate the modal fields
-            $('#edit_brand_id').val(brandId);
-            $('#edit_brand_name').val(brandName);
+            // Populate all other fields
+            $('#edit_discount_code').val(data.code);
+            $('#edit_type').val(data.type);
+            $('#edit_value').val(data.value);
+            $('#edit_applicable_to').val(data.appliesTo);
+            $('#edit_start_date').val(data.startDate);
+            $('#edit_expiry_date').val(data.expiryDate);
+
+            // Special handling for category ID and visibility
+            $('#edit_category_id').val(data.categoryId);
+            toggleCategoryField('#edit_applicable_to', '#edit_category_field');
         });
     });
     </script>

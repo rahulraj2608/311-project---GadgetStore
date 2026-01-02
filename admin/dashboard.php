@@ -10,9 +10,9 @@ if (!isLoggedIn() || !isAdmin()) {
 
 // Get statistics
 $total_products = $pdo->query("SELECT COUNT(*) as count FROM product")->fetch()['count'];
-$total_orders = $pdo->query("SELECT COUNT(*) as count FROM orders")->fetch()['count'];
+$total_orders = $pdo->query("SELECT COUNT(*) as count FROM `orders`")->fetch()['count'];
 $total_customers = $pdo->query("SELECT COUNT(*) as count FROM customer WHERE is_admin = 0")->fetch()['count'];
-$recent_orders = $pdo->query("SELECT o.*, c.first_name, c.last_name FROM orders o 
+$recent_orders = $pdo->query("SELECT o.*, c.first_name, c.last_name FROM `orders` o 
                               JOIN customer c ON o.customer_id = c.customer_id 
                               ORDER BY order_date DESC LIMIT 5")->fetchAll();
 ?>
@@ -50,42 +50,7 @@ $recent_orders = $pdo->query("SELECT o.*, c.first_name, c.last_name FROM orders 
     <div class="container-fluid">
         <div class="row">
             <!-- Sidebar -->
-            <nav class="col-md-3 col-lg-2 d-md-block sidebar bg-dark">
-                <div class="position-sticky pt-3">
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link active" href="dashboard.php">
-                                <i class="bi bi-speedometer2"></i> Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="products.php">
-                                <i class="bi bi-box"></i> Products
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="categories.php">
-                                <i class="bi bi-tags"></i> Categories
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="orders.php">
-                                <i class="bi bi-cart"></i> Orders
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="customers.php">
-                                <i class="bi bi-people"></i> Customers
-                            </a>
-                        </li>
-                        <li class="nav-item mt-4">
-                            <a class="nav-link" href="../logout.php">
-                                <i class="bi bi-box-arrow-right"></i> Logout
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-            </nav>
+              <?php include '../includes/admin-nav.php'; ?>
 
             <!-- Main Content -->
             <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
@@ -123,7 +88,7 @@ $recent_orders = $pdo->query("SELECT o.*, c.first_name, c.last_name FROM orders 
                                 <h5 class="card-title">Revenue</h5>
                                 <h2>
                                     $<?php 
-                                    $revenue = $pdo->query("SELECT SUM(total_amount) as total FROM orders WHERE order_status = 'completed'")->fetch()['total'];
+                                    $revenue = $pdo->query("SELECT SUM(total_amount) as total FROM `orders` WHERE order_status = 'completed'")->fetch()['total'];
                                     echo number_format($revenue ?? 0, 2);
                                     ?>
                                 </h2>

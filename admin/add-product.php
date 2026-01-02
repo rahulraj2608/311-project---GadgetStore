@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $file_path = $upload_dir . $file_name;
                     
                     if (move_uploaded_file($tmp_name, $file_path)) {
-                        $image_url = 'uploads/products/' . $file_name;
+                        $image_url = 'localhost/ge/uploads/products/' . $file_name;
                         $is_primary = ($image_counter === 0) ? 1 : 0;
                         
                         $img_stmt = $pdo->prepare("INSERT INTO product_image (product_id, image_url, is_primary) VALUES (?, ?, ?)");
